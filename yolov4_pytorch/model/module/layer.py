@@ -162,7 +162,7 @@ class YOLO(nn.Module):
         if profile:
             print('%.1fms total' % sum(dt))
         return x
-
+    '''
     def _initialize_biases(self, cf=None):  # initialize biases into Detect(), cf is class frequency
         # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1.
         m = self.model[-1]  # Detect() module
@@ -171,7 +171,15 @@ class YOLO(nn.Module):
             b[:, 4] += math.log(8 / (640 / s) ** 2)  # obj (8 objects per 640 image)
             b[:, 5:] += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
             mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
-
+    '''
+    def _initialize_biases(self, cf=None):  # initialize biases into Detect(), cf is class frequency
+        m = self.model[-1]  # Detect() module
+        for mi, s in zip(m.m, m.stride):  #  from
+            b = mi.bias.view(m.na, -1).clone()  # conv.bias(255) to (3,85)
+            b[:, 4] = b[:, 4] + math.log(8 / (640 / s) ** 2)  # obj (8 objects per 640 image)
+            b[:, 5:] = b[:, 5:] + (math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum()))  # cls
+            mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
+            
     def _print_biases(self):
         m = self.model[-1]  # Detect() module
         for mi in m.m:  #  from
