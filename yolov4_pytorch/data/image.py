@@ -170,6 +170,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         # Get labels
         labels, shapes = zip(*[cache[x] for x in self.image_files])
+        #labels, shapes = zip(*[(cache[x][0], cache[x][1]) for x in self.image_files if x in cache])
+
         self.shapes = np.array(shapes, dtype=np.float64)
         self.labels = list(labels)
 

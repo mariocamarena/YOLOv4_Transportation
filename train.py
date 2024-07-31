@@ -192,7 +192,7 @@ def train():
     print(f"Starting training for {epochs} epochs...")
 
     # Creates a GradScaler once at the beginning of training.
-    scaler = amp.GradScaler()
+    scaler = torch.amp.GradScaler()
 
     for epoch in range(start_epoch, epochs):
         model.train()
@@ -220,7 +220,7 @@ def train():
                         x["momentum"] = np.interp(ni, xi, [0.9, hyper_parameters["momentum"]])
 
             # Mixed precision training
-            with amp.autocast():
+            with torch.amp.autocast(device_type='cuda:0', enabled=True):
                 outputs = model(images)
                 loss, loss_items = compute_loss(outputs, targets.to(device), model)  # scaled by batch_size
 
@@ -286,7 +286,13 @@ def train():
     # Finish
     print(f"{epoch - start_epoch} epochs completed in {(time.time() - start_time) / 3600:.3f} hours.\n")
 
-    torch.distributed.destroy_process_group()
+    
+    if torch.distributed.is_initialized():
+        print("Destroying process group")
+        torch.distributed.destroy_process_group()
+    else:
+        print("Process group not initialized")
+        
     torch.cuda.empty_cache()
     return results
 

@@ -17,7 +17,7 @@ for filename in tqdm(files, desc="Processing files"):
     if filename.endswith('_gtFine_color.png'):
         # construct the paths to the .png file and the corresponding .txt files
         png_path = os.path.join(source_directory, filename)
-        txt_path = os.path.join(source_directory, filename.replace('_gtFine_color.png', '_gtFine_polygons.txt'))
+        txt_path = os.path.join(source_directory, filename.replace('_gtFine_color.png', '_gtFine_color.txt'))
         new_txt_path = os.path.join(destination_directory, filename.replace('.png', '.txt'))
 
         # check if the corresponding .txt file exists

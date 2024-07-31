@@ -1,5 +1,5 @@
 train: "C:/Users/Mario/OneDrive/Desktop/YOLOv4-PyTorch-Transportation/data/custom/train.txt"
-val: data/custom/val.txt
+val: "C:/Users/Mario/OneDrive/Desktop/YOLOv4-PyTorch-Transportation/data/custom/val.txt"
 test: data/custom/test.txt
 
 number_classes: 19  # Number of classes in the Cityscapes dataset used for training

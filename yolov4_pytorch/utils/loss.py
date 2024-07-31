@@ -15,6 +15,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+
 from .iou import bbox_iou
 
 
@@ -117,7 +120,7 @@ def ap_per_class(tp, conf, pred_cls, target_cls):
 
     return p, r, ap, f1, unique_classes.astype('int32')
 
-
+'''
 def build_targets(p, targets, model):
     # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
     det = model.module.model[-1] if type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel) \
@@ -126,7 +129,7 @@ def build_targets(p, targets, model):
     tcls, tbox, indices, anch = [], [], [], []
     gain = torch.ones(6, device=targets.device)  # normalized to gridspace gain
     off = torch.tensor([[1, 0], [0, 1], [-1, 0], [0, -1]], device=targets.device).float()  # overlap offsets
-    at = torch.arange(na).view(na, 1).repeat(1, nt)  # anchor tensor, same as .repeat_interleave(nt)
+    at = torch.arange(na, device=device).view(na, 1).repeat(1, nt)  # anchor tensor, same as .repeat_interleave(nt)
 
     g = 0.5  # offset
     style = 'rect4'
@@ -139,7 +142,7 @@ def build_targets(p, targets, model):
         if nt:
             r = t[None, :, 4:6] / anchors[:, None]  # wh ratio
             j = torch.max(r, 1. / r).max(2)[0] < model.hyper_parameters['anchor_t']  # compare
-            # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n) = wh_iou(anchors(3,2), gwh(n,2))
+            j = j.to(device)  # ensure j is on the correct device
             a, t = at[j], t.repeat(na, 1, 1)[j]  # filter
 
             # overlaps
@@ -163,12 +166,72 @@ def build_targets(p, targets, model):
         gi, gj = gij.T  # grid xy indices
 
         # Append
+        indices.append((b.to(device), a.to(device), gj.to(device), gi.to(device)))  # image, anchor, grid indices
+        tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
+        anch.append(anchors[a])  # anchors
+        tcls.append(c)  # class
+
+    return tcls, tbox, indices, anch
+'''
+
+def build_targets(p, targets, model):
+    # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
+    det = model.module.model[-1] if type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel) \
+        else model.model[-1]  # Detect() module
+    na, nt = det.na, targets.shape[0]  # number of anchors, targets
+    tcls, tbox, indices, anch = [], [], [], []
+    gain = torch.ones(6, device=targets.device)  # normalized to gridspace gain
+    off = torch.tensor([[1, 0], [0, 1], [-1, 0], [0, -1]], device=targets.device).float()  # overlap offsets
+    at = torch.arange(na, device=device).view(na, 1).repeat(1, nt)  # anchor tensor, same as .repeat_interleave(nt)
+
+    g = 0.5  # offset
+    style = 'rect4'
+    for i in range(det.nl):
+        anchors = det.anchors[i]
+        gain[2:] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
+
+        # Match targets to anchors
+        a, t, offsets = [], targets * gain, 0
+        if nt:
+            r = t[None, :, 4:6] / anchors[:, None]  # wh ratio
+            j = torch.max(r, 1. / r).max(2)[0] < model.hyper_parameters['anchor_t']  # compare
+            j = j.to(device)  # ensure j is on the correct device
+            a, t = at[j], t.repeat(na, 1, 1)[j]  # filter
+            a = a.long().to(device)  # ensure a is on the correct device and is of type long
+
+            # overlaps
+            gxy = t[:, 2:4]  # grid xy
+            z = torch.zeros_like(gxy)
+            if style == 'rect2':
+                j, k = ((gxy % 1. < g) & (gxy > 1.)).T
+                a, t = torch.cat((a, a[j], a[k]), 0), torch.cat((t, t[j], t[k]), 0)
+                offsets = torch.cat((z, z[j] + off[0], z[k] + off[1]), 0) * g
+            elif style == 'rect4':
+                j, k = ((gxy % 1. < g) & (gxy > 1.)).T
+                l, m = ((gxy % 1. > (1 - g)) & (gxy < (gain[[2, 3]] - 1.))).T
+                a, t = torch.cat((a, a[j], a[k], a[l], a[m]), 0), torch.cat((t, t[j], t[k], t[l], t[m]), 0)
+                offsets = torch.cat((z, z[j] + off[0], z[k] + off[1], z[l] + off[2], z[m] + off[3]), 0) * g
+
+        # Define
+        b, c = t[:, :2].long().T  # image, class
+        gxy = t[:, 2:4]  # grid xy
+        gwh = t[:, 4:6]  # grid wh
+        gij = (gxy - offsets).long()
+        gi, gj = gij.T  # grid xy indices
+
+        # Ensure b, a, gj, gi are tensors
+        b, a, gj, gi = torch.tensor(b).to(device), torch.tensor(a).to(device), torch.tensor(gj).to(device), torch.tensor(gi).to(device)
+
+        # Append
         indices.append((b, a, gj, gi))  # image, anchor, grid indices
         tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
         anch.append(anchors[a])  # anchors
         tcls.append(c)  # class
 
     return tcls, tbox, indices, anch
+
+
+
 
 
 def compute_ap(recall, precision):
@@ -199,7 +262,7 @@ def compute_ap(recall, precision):
 
     return ap
 
-
+'''
 def compute_loss(p, targets, model):  # predictions, targets, model
     device = targets.device
     ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
@@ -249,9 +312,70 @@ def compute_loss(p, targets, model):  # predictions, targets, model
                 t[range(nb), tcls[i]] = cp
                 lcls += BCEcls(ps[:, 5:], t)  # BCE
 
-            # Append targets to text file
-            # with open('targets.txt', 'a') as file:
-            #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
+        lobj += BCEobj(pi[..., 4], tobj) * balance[i]  # obj loss
+
+    s = 3 / np  # output count scaling
+    lbox *= h['giou'] * s
+    lobj *= h['obj'] * s * (1.4 if np == 4 else 1.)
+    lcls *= h['cls'] * s
+    bs = tobj.shape[0]  # batch size
+    if red == 'sum':
+        g = 3.0  # loss gain
+        lobj *= g / bs
+        if nt:
+            lcls *= g / nt / model.number_classes
+            lbox *= g / nt
+
+    loss = lbox + lobj + lcls
+    return loss * bs, torch.cat((lbox, lobj, lcls, loss)).detach()
+'''
+def compute_loss(p, targets, model):  # predictions, targets, model
+    device = targets.device
+    lcls, lbox, lobj = torch.tensor([0.0], dtype=torch.float32, device=device), torch.tensor([0.0], dtype=torch.float32, device=device), torch.tensor([0.0], dtype=torch.float32, device=device)  # Changed to use torch.float32 as dtype
+    tcls, tbox, indices, anchors = build_targets(p, targets, model)  # targets
+    h = model.hyper_parameters  # hyperparameters
+    red = 'mean'  # Loss reduction (sum or mean)
+
+    # Define criteria
+    BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['cls_pw']], dtype=torch.float32, device=device), reduction=red).to(device)
+    BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['obj_pw']], dtype=torch.float32, device=device), reduction=red).to(device)
+
+    # class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
+    cp, cn = smooth_BCE(eps=0.0)
+
+    # focal loss
+    g = h['fl_gamma']  # focal loss gamma
+    if g > 0:
+        BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
+
+    # per output
+    nt = 0  # number of targets
+    np = len(p)  # number of outputs
+    balance = [4.0, 1.0, 0.4] if np == 3 else [4.0, 1.0, 0.4, 0.1]  # P3-5 or P3-6
+    for i, pi in enumerate(p):  # layer index, layer predictions
+        b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
+        tobj = torch.zeros_like(pi[..., 0]).to(device)  # target obj
+
+        nb = b.shape[0]  # number of targets
+        if nb:
+            nt += nb  # cumulative targets
+            ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
+
+            # GIoU
+            pxy = ps[:, :2].sigmoid() * 2. - 0.5
+            pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
+            pbox = torch.cat((pxy, pwh), 1).to(device)  # predicted box
+            giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou(prediction, target)
+            lbox += (1.0 - giou).sum() if red == 'sum' else (1.0 - giou).mean()  # giou loss
+
+            # Obj
+            tobj[b, a, gj, gi] = (1.0 - 1.0) + 1.0 * giou.detach().clamp(0).type(tobj.dtype)  # giou ratio
+
+            # Class
+            if model.number_classes > 1:  # cls loss (only if multiple classes)
+                t = torch.full_like(ps[:, 5:], cn).to(device)  # targets
+                t[range(nb), tcls[i]] = cp
+                lcls += BCEcls(ps[:, 5:], t)  # BCE
 
         lobj += BCEobj(pi[..., 4], tobj) * balance[i]  # obj loss
 
@@ -269,6 +393,7 @@ def compute_loss(p, targets, model):  # predictions, targets, model
 
     loss = lbox + lobj + lcls
     return loss * bs, torch.cat((lbox, lobj, lcls, loss)).detach()
+
 
 
 def fitness(x):

@@ -117,7 +117,7 @@ class YOLO(nn.Module):
         self.info()
         print('')
 
-    @amp.autocast()
+    @torch.amp.autocast(device_type='cuda:0', enabled=True)
     def forward(self, x, augment=False, profile=False):
         if augment:
             image_size = x.shape[-2:]  # height, width
@@ -137,7 +137,7 @@ class YOLO(nn.Module):
         else:
             return self.forward_once(x, profile)  # single-scale inference, train
 
-    @amp.autocast()
+    @torch.amp.autocast(device_type='cuda:0', enabled=True)
     def forward_once(self, x, profile=False):
         y, dt = [], []  # outputs
         for m in self.model:
